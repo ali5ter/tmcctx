@@ -1,0 +1,216 @@
+#!/usr/bin/env bash
+# @file tmcmc
+# Simple switch TMC defaul management cluster
+# @author Alister Lewis-Bowen <alister@lewis-bowen.org>
+# Adapted for TMC from kubectx
+# @ref https://github.com/ahmetb/kubectx
+
+[[ -n $DEBUG ]] && set -x
+set -eou pipefail
+
+IFS=$'\n\t'
+SELF_CMD="$0"
+TMCMC_DIR="$HOME/.config/tmcmc"
+
+usage() {
+    cat <<EOF
+USAGE:
+  $SELF                    : list the management clusters in the current context
+  $SELF <NAME>             : change the active management cluster of current context
+  $SELF -                  : switch to the previous management cluster in this context
+  $SELF -c, --current      : show the current management cluster
+  $SELF -h,--help          : show this message
+EOF
+}
+
+exit_err() {
+   echo >&2 "${1}"
+   exit 1
+}
+
+current_mgmt_cluster() {
+    local cur_ctx mc
+
+    cur_ctx="$(current_context)" || exit_err "error getting current context"
+    mc="$(tmc system context get "${cur_ctx}" | grep MANAGEMENT_CLUSTER_NAME | cut -d':' -f2 | sed -e 's/^[ ]*//')" \
+        || exit_err "error getting current management cluster"
+
+    if [[ -z "${mc}" ]]; then
+        echo
+    else
+        echo "${mc}"
+    fi
+}
+
+current_provisioner() {
+    local cur_ctx p
+
+    cur_ctx="$(current_context)" || exit_err "error getting current context"
+    p="$(tmc system context get "${cur_ctx}" | grep PROVISIONER_NAME | cut -d':' -f2 | sed -e 's/^[ ]*//')" \
+        || exit_err "error getting current provisioner"
+
+    if [[ -z "${p}" ]]; then
+        echo
+    else
+        echo "${p}"
+    fi
+}
+
+current_context() {
+    # Current context direct from tmc command...
+    # !! Need to parse yaml, e.g. tmc system context current | yq e '.full_name.name' -
+    grep name "$TMC_CONFIG_DIR/current-context" 2>/dev/null | \
+        cut -d':' -f2 | \
+        sed -e 's/^[ ]*//'
+}
+
+get_mgmt_clusters() {
+    tmc managementcluster list --all | awk '{print $1}' | sort -n
+}
+
+escape_context_name() {
+    echo "${1//\//-}"
+}
+
+mgmt_cluster_file() {
+    local ctx
+
+    ctx="$(escape_context_name "${1}")"
+    echo "${TMCMC_DIR}/${ctx}"
+}
+
+read_mgmt_cluster() {
+    local f
+    f="$(mgmt_cluster_file "${1}")"
+    [[ -f "${f}" ]] && cat "${f}"
+    return 0
+}
+
+save_mgmt_cluster() {
+    mkdir -p "${TMCMC_DIR}"
+    local f saved
+    f="$(mgmt_cluster_file "${1}")"
+    saved="$(read_mgmt_cluster "${1}")"
+
+    if [[ "${saved}" != "${2}" ]]; then
+        printf %s "${2}" > "${f}"
+    fi
+}
+
+switch_mgmt_cluster() {
+    local ctx="${1}"
+    # !! Can't find a way to get provisioners so need to grab current one
+    # !! Unable to set defaults independenty from each other
+    tmc configure -m "${2}" -p "$(current_provisioner)"
+    echo "Active management cluster is \"${2}\".">&2
+}
+
+choose_mgmt_cluster_interactive() {
+    # directly calling kubens via fzf might fail with a cryptic error like
+    # "$FZF_DEFAULT_COMMAND failed", so try to see if we can list management
+    # clusters locally first
+    if [[ -z "$(list_mgmt_clusters)" ]]; then
+        echo >&2 "error: could not list management clusters"
+        exit 1
+    fi
+
+    local choice
+    choice="$(_KUBECTX_FORCE_COLOR=1 \
+        FZF_DEFAULT_COMMAND="${SELF_CMD}" \
+        fzf --ansi --no-preview || true)"
+    if [[ -z "${choice}" ]]; then
+        echo 2>&1 "error: you did not choose any of the options"
+        exit 1
+    else
+        set_mgmt_cluster "${choice}"
+    fi
+}
+
+set_mgmt_cluster() {
+    local ctx prev
+    ctx="$(current_context)" || exit_err "error getting current context"
+    prev="$(current_mgmt_cluster)" || exit_error "error getting current management cluster"
+
+    if grep -q ^"${1}"\$ <(get_mgmt_clusters); then
+        switch_mgmt_cluster "${ctx}" "${1}"
+
+        if [[ "${prev}" != "${1}" ]]; then
+        save_mgmt_cluster "${ctx}" "${prev}"
+        fi
+    else
+        echo "error: no management cluster exists with name \"${1}\".">&2
+        exit 1
+    fi
+}
+
+list_mgmt_clusters() {
+    local yellow darkbg normal
+    yellow=$(tput setaf 3 || true)
+    darkbg=$(tput setab 0 || true)
+    normal=$(tput sgr0 || true)
+
+    local cur_ctx_fg cur_ctx_bg
+    cur_ctx_fg=${TMCTX_CURRENT_FGCOLOR:-$yellow}
+    cur_ctx_bg=${TMCTX_CURRENT_BGCOLOR:-$darkbg}
+
+    local cur mc_list
+    cur="$(current_mgmt_cluster)" || exit_err "error getting current management cluster"
+    mc_list=$(get_mgmt_clusters) || exit_err "error getting management cluster list"
+
+    for c in $mc_list; do
+    if [[ -n "${_TMCTX_FORCE_COLOR:-}" || \
+        -t 1 && -z "${NO_COLOR:-}" ]]; then
+        # colored output mode
+        if [[ "${c}" = "${cur}" ]]; then
+        echo "${cur_ctx_bg}${cur_ctx_fg}${c}${normal}"
+        else
+        echo "${c}"
+        fi
+    else
+        echo "${c}"
+    fi
+    done
+}
+
+swap_mgmt_cluster() {
+    local ctx mc
+    ctx="$(current_context)" || exit_err "error getting current context"
+    mc="$(read_mgmt_cluster "${ctx}")"
+    if [[ -z "${mc}" ]]; then
+        echo "error: No previous management cluster found for current context." >&2
+        exit 1
+    fi
+    set_mgmt_cluster "${mc}"
+}
+
+main() {
+    if [[ "$#" -eq 0 ]]; then
+        if [[ -t 1 && -z ${TMCTX_IGNORE_FZF:-} && "$(type fzf &>/dev/null; echo $?)" -eq 0 ]]; then
+            choose_mgmt_cluster_interactive
+        else
+            list_mgmt_clusters
+        fi
+    elif [[ "$#" -eq 1 ]]; then
+        if [[ "${1}" == '-h' || "${1}" == '--help' ]]; then
+            usage
+        elif [[ "${1}" == "-" ]]; then
+            swap_mgmt_cluster
+        elif [[ "${1}" == '-c' || "${1}" == '--current' ]]; then
+            current_mgmt_cluster
+        elif [[ "${1}" =~ ^-(.*) ]]; then
+            echo "error: unrecognized flag \"${1}\"" >&2
+            usage
+            exit 1
+        elif [[ "${1}" =~ (.+)=(.+) ]]; then
+            alias_context "${BASH_REMATCH[2]}" "${BASH_REMATCH[1]}"
+        else
+            set_mgmt_cluster "${1}"
+        fi
+    else
+        echo "error: too many flags" >&2
+        usage
+        exit 1
+    fi
+}
+
+main "$@"

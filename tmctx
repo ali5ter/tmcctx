@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+# @file tmctx
+# Simple switch TMC contexts
+# @author Alister Lewis-Bowen <alister@lewis-bowen.org>
+# Adapted for TMC from TMCTX
+# @ref https://github.com/ahmetb/TMCTX
+
+[[ -n $DEBUG ]] && set -x
+set -eou pipefail
+
+IFS=$'\n\t'
+SELF_CMD="$0"
+TMCTX="$HOME/.config/tmctx"
+TMC_CONFIG_DIR="$HOME/.vmware-cna-saas"
+
+usage() {
+    cat <<EOF
+USAGE:
+  tmctx                       : list the contexts
+  tmctx <NAME>                : switch to context <NAME>
+  tmctx -                     : switch to the previous context
+  tmctx -c, --current         : show the current context name
+  tmctx -h,--help             : show this message
+EOF
+}
+
+exit_err() { echo >&2 "${1}"; exit 1; }
+
+current_context() {
+    # Current context direct from tmc command...
+    # !! Need to parse yaml, e.g. tmc system context current | yq e '.full_name.name' -
+    grep name "$TMC_CONFIG_DIR/current-context" 2>/dev/null | \
+        cut -d':' -f2 | \
+        sed -e 's/^[ ]*//'
+}
+
+get_contexts() {
+    tmc system context current | \
+        grep ' name:' | \
+        cut -d':' -f2 | \
+        sed -e 's/^[ ]*//'| sort -n
+}
+
+list_contexts() {
+    set -u pipefail
+    local cur ctx_list
+    cur="$(current_context)" || exit_err "error getting current context"
+    ctx_list=$(get_contexts) || exit_err "error getting context list"
+
+    local yellow darkbg normal
+    yellow=$(tput setaf 3 || true)
+    darkbg=$(tput setab 0 || true)
+    normal=$(tput sgr0 || true)
+
+    local cur_ctx_fg cur_ctx_bg
+    cur_ctx_fg=${TMCTX_CURRENT_FGCOLOR:-$yellow}
+    cur_ctx_bg=${TMCTX_CURRENT_BGCOLOR:-$darkbg}
+
+    for c in $ctx_list; do
+        if [[ -n "${_TMCTX_FORCE_COLOR:-}" || \
+              -t 1 && -z "${NO_COLOR:-}" ]]; then
+          # colored output mode
+          if [[ "${c}" = "${cur}" ]]; then
+              echo "${cur_ctx_bg}${cur_ctx_fg}${c}${normal}"
+          else
+              echo "${c}"
+          fi
+        else
+            echo "${c}"
+        fi
+    done
+}
+
+read_context() {
+  if [[ -f "${TMCTX}" ]]; then
+    cat "${TMCTX}"
+  fi
+}
+
+save_context() {
+    local saved
+    saved="$(read_context)"
+    [ "${saved}" != "${1}" ] && printf %s "${1}" > "${TMCTX}"
+}
+
+switch_context() {
+  tmc system context use "${1}"
+}
+
+choose_context_interactive() {
+    local choice
+    choice="$(_TMCTX_FORCE_COLOR=1 \
+        FZF_DEFAULT_COMMAND="${SELF_CMD}" \
+        fzf --ansi --no-preview || true)"
+    if [[ -z "${choice}" ]]; then
+        echo 2>&1 "error: you did not choose any of the options"
+        exit 1
+    else
+        set_context "${choice}"
+    fi
+}
+
+set_context() {
+    local prev
+    prev="$(current_context)" || exit_err "error getting current context"
+
+    switch_context "${1}"
+
+    if [[ "${prev}" != "${1}" ]]; then
+        save_context "${prev}"
+    fi
+}
+
+swap_context() {
+    local ctx
+    ctx="$(read_context)"
+    if [[ -z "${ctx}" ]]; then
+        echo "error: No previous context found." >&2
+        exit 1
+    fi
+    set_context "${ctx}"
+}
+
+main() {
+    if [[ "$#" -eq 0 ]]; then
+        if [[ -t 1 &&  -z "${TMCTX_IGNORE_FZF:-}" && "$(type fzf &>/dev/null; echo $?)" -eq 0 ]]; then
+            choose_context_interactive
+        else
+            list_contexts
+        fi
+    elif [[ "$#" -gt 1 ]]; then
+        echo "error: too many arguments" >&2
+        usage
+        exit 1
+    elif [[ "$#" -eq 1 ]]; then
+        if [[ "${1}" == "-" ]]; then
+            swap_context
+        elif [[ "${1}" == '-c' || "${1}" == '--current' ]]; then
+            current_context
+        elif [[ "${1}" == '-h' || "${1}" == '--help' ]]; then
+            usage
+        elif [[ "${1}" =~ ^-(.*) ]]; then
+            echo "error: unrecognized flag \"${1}\"" >&2
+            usage
+            exit 1
+        else
+            set_context "${1}"
+        fi
+    else
+        usage
+        exit 1
+    fi
+}
+
+main "$@"
