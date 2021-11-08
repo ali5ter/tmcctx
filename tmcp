@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# @file tmcmc
-# Simple switch TMC default management cluster
+# @file tmcp
+# Simple switch TMC default provisioners
 # @author Alister Lewis-Bowen <alister@lewis-bowen.org>
 # Adapted for TMC from kubectx
 # @ref https://github.com/ahmetb/kubectx
@@ -10,17 +10,16 @@ set -eou pipefail
 
 IFS=$'\n\t'
 SELF_CMD="$0"
-TMCMC_DIR="$HOME/.config/tmcmc"
-TMCP="tmcp"
+TMCP_DIR="$HOME/.config/tmcp"
 
 usage() {
     cat <<EOF
 USAGE:
-  tmcmc                    : list the management clusters in the current context
-  tmcmc <NAME>             : change the active management cluster of current context
-  tmcmc -                  : switch to the previous management cluster in this context
-  tmcmc -c, --current      : show the current management cluster
-  tmcmc -h,--help          : show this message
+  tmcp                    : list the provisioners in the current management cluster
+  tmcp <NAME>             : change the active provisioner of current management cluster
+  tmcp -                  : switch to the previous provisioner in this management cluster
+  tmcp -c, --current      : show the current provisioner
+  tmcp -h,--help          : show this message
 EOF
 }
 
@@ -54,8 +53,8 @@ current_mgmt_cluster() {
 
 current_provisioner() {
     local cur_ctx p
-
     cur_ctx="$(current_context)" || exit_err "error getting current context"
+
     # !! Only returns yaml so need to jump through hoops to get default values
     p="$(tmc system context get "${cur_ctx}" | grep PROVISIONER_NAME | cut -d':' -f2 | sed -e 's/^[ ]*//')" \
         || exit_err "error getting current provisioner"
@@ -67,66 +66,59 @@ current_provisioner() {
     fi
 }
 
-get_mgmt_clusters() {
-    # !! Output with or without --all flag looks the same
-    tmc mc list --all | grep -v NAME | awk '{print $1}' | sort -n
-}
-
 get_provisioners() {
     # !! Provisioner suncommand not shown in management cluster command help
     tmc mc prv list -m "${1}" | grep -v NAME | awk '{print $1}' | sort -n
 }
 
-escape_context_name() {
+escape_mgmt_cluster_name() {
     echo "${1//\//-}"
 }
 
-mgmt_cluster_file() {
-    local ctx
-
-    ctx="$(escape_context_name "${1}")"
-    echo "${TMCMC_DIR}/${ctx}"
+provisioner_file() {
+    local mc
+    mc="$(escape_mgmt_cluster_name "${1}")"
+    echo "${TMCP_DIR}/${mc}"
 }
 
-read_mgmt_cluster() {
+read_provisioner() {
     local f
-    f="$(mgmt_cluster_file "${1}")"
+    f="$(provisioner_file "${1}")"
+
     [[ -f "${f}" ]] && cat "${f}"
     return 0
 }
 
-save_mgmt_cluster() {
-    mkdir -p "${TMCMC_DIR}"
+save_provisioner() {
+    mkdir -p "${TMCP_DIR}"
     local f saved
-    f="$(mgmt_cluster_file "${1}")"
-    saved="$(read_mgmt_cluster "${1}")"
+    f="$(provisioner_file "${1}")"
+    saved="$(read_provisioner "${1}")"
 
     if [[ "${saved}" != "${2}" ]]; then
         printf %s "${2}" > "${f}"
     fi
 }
 
-switch_mgmt_cluster() {
-    local ctx="${1}" p
-    p="$(current_provisioner)" || exit_error "error getting current provisioner"
-
+switch_provisioner() {
+    local mc="${1}"
     # !! Unable to set defaults independenty from each other
-    tmc configure -m "${2}" -p "$(current_provisioner)"
-    echo "Active management cluster is \"${2}\".">&2
-
-    if ! grep -q ^"$p"\$ <(get_provisioners "${2}"); then
-        echo "warning: unable to find provisioner called \"${p}\" in this management cluster. Fetching provisioners... ">&2
-        "${TMCP}"
-    fi
+    tmc configure -m "${mc}" -p "${2}"
+    echo "Active provisioner is \"${2}\".">&2
 }
 
-choose_mgmt_cluster_interactive() {
+choose_provisioner_interactive() {
     # directly calling tmcmc via fzf might fail with a cryptic error like
-    # "$FZF_DEFAULT_COMMAND failed", so try to see if we can list management
-    # clusters locally first
-    if [[ -z "$(list_mgmt_clusters)" ]]; then
-        echo >&2 "error: could not list management clusters"
+    # "$FZF_DEFAULT_COMMAND failed", so try to see if we can list 
+    # provisioners locally first
+    local p_list
+    p_list="$(list_provisioners)"
+    if [[ -z "$p_list" ]]; then
+        echo >&2 "error: could not list provisioners"
         exit 1
+    elif [[ "$(echo "${p_list}" | wc -l)" -eq 1 ]]; then
+        set_provisioner "${p_list}"
+        return 0
     fi
 
     local choice
@@ -137,28 +129,28 @@ choose_mgmt_cluster_interactive() {
         echo 2>&1 "error: you did not choose any of the options"
         exit 1
     else
-        set_mgmt_cluster "${choice}"
+        set_provisioner "${choice}"
     fi
 }
 
-set_mgmt_cluster() {
-    local ctx prev
-    ctx="$(current_context)" || exit_err "error getting current context"
-    prev="$(current_mgmt_cluster)" || exit_error "error getting current management cluster"
+set_provisioner() {
+    local mc prev
+    mc="$(current_mgmt_cluster)" || exit_err "error getting current management cluster"
+    prev="$(current_provisioner)" || exit_error "error getting current provisioner"
 
-    if grep -q ^"${1}"\$ <(get_mgmt_clusters); then
-        switch_mgmt_cluster "${ctx}" "${1}"
+    if grep -q ^"${1}"\$ <(get_provisioners "${mc}"); then
+        switch_provisioner "${mc}" "${1}"
 
         if [[ "${prev}" != "${1}" ]]; then
-        save_mgmt_cluster "${ctx}" "${prev}"
+        save_provisioner "${mc}" "${prev}"
         fi
     else
-        echo "error: no management cluster exists with name \"${1}\".">&2
+        echo "error: no provisioner exists with name \"${1}\".">&2
         exit 1
     fi
 }
 
-list_mgmt_clusters() {
+list_provisioners() {
     local yellow darkbg normal
     yellow=$(tput setaf 3 || true)
     darkbg=$(tput setab 0 || true)
@@ -168,56 +160,58 @@ list_mgmt_clusters() {
     cur_ctx_fg=${TMCTX_CURRENT_FGCOLOR:-$yellow}
     cur_ctx_bg=${TMCTX_CURRENT_BGCOLOR:-$darkbg}
 
-    local cur mc_list
-    cur="$(current_mgmt_cluster)" || exit_err "error getting current management cluster"
-    mc_list=$(get_mgmt_clusters) || exit_err "error getting management cluster list"
+    local cur p_list
+    cur="$(current_mgmt_cluster)" || exit_err "error getting current provisioner"
+    p_list=$(get_provisioners "${cur}") || exit_err "error getting management cluster list"
 
-    for c in $mc_list; do
-    if [[ -n "${_TMCTX_FORCE_COLOR:-}" || \
+    for c in $p_list; do
+        if [[ -n "${_TMCTX_FORCE_COLOR:-}" || \
         -t 1 && -z "${NO_COLOR:-}" ]]; then
-        # colored output mode
-        if [[ "${c}" = "${cur}" ]]; then
-        echo "${cur_ctx_bg}${cur_ctx_fg}${c}${normal}"
+            # colored output mode
+            if [[ "${c}" = "${cur}" ]]; then
+            echo "${cur_ctx_bg}${cur_ctx_fg}${c}${normal}"
+            else
+            echo "${c}"
+            fi
         else
-        echo "${c}"
+            echo "${c}"
         fi
-    else
-        echo "${c}"
-    fi
     done
 }
 
-swap_mgmt_cluster() {
-    local ctx mc
-    ctx="$(current_context)" || exit_err "error getting current context"
-    mc="$(read_mgmt_cluster "${ctx}")"
-    if [[ -z "${mc}" ]]; then
-        echo "error: No previous management cluster found for current context." >&2
+swap_provisioner() {
+    local mc p
+    mc="$(current_mgmt_cluster)" || exit_err "error getting current management cluster"
+    p="$(read_provisioner "${mc}")"
+    if [[ -z "${p}" ]]; then
+        echo "error: No previous provisioner found for current management cluster." >&2
         exit 1
     fi
-    set_mgmt_cluster "${mc}"
+    set_provisioner "${p}"
 }
 
 main() {
     if [[ "$#" -eq 0 ]]; then
         if [[ -t 1 && -z ${TMCTX_IGNORE_FZF:-} && "$(type fzf &>/dev/null; echo $?)" -eq 0 ]]; then
-            choose_mgmt_cluster_interactive
+            choose_provisioner_interactive
         else
-            list_mgmt_clusters
+            list_provisioners
         fi
     elif [[ "$#" -eq 1 ]]; then
         if [[ "${1}" == '-h' || "${1}" == '--help' ]]; then
             usage
         elif [[ "${1}" == "-" ]]; then
-            swap_mgmt_cluster
+            swap_provisioner
         elif [[ "${1}" == '-c' || "${1}" == '--current' ]]; then
-            current_mgmt_cluster
+            current_provisioner
         elif [[ "${1}" =~ ^-(.*) ]]; then
             echo "error: unrecognized flag \"${1}\"" >&2
             usage
             exit 1
+        elif [[ "${1}" =~ (.+)=(.+) ]]; then
+            alias_context "${BASH_REMATCH[2]}" "${BASH_REMATCH[1]}"
         else
-            set_mgmt_cluster "${1}"
+            set_provisioner "${1}"
         fi
     else
         echo "error: too many flags" >&2

@@ -1,4 +1,4 @@
-# tmctx + tmcmc: Tools for VMware Tanzu Mission Control CLI
+# tmctx + tmcmc + tmcp: Tools for VMware Tanzu Mission Control CLI
 
 Inspired by [kubectx](https://github.com/ahmetb/kubectx), this repository provides [tmctx](tmcctx) and [tmcmc](tmcmc) utilities.
 
@@ -6,15 +6,18 @@ Inspired by [kubectx](https://github.com/ahmetb/kubectx), this repository provid
 
 [tmcmc](tmcmc) helps you switch between VMware Tanzu Mission Control (TMC) CLI management clusters.
 
-If you have [fzf](https://github.com/junegunn/fzf) installed, it makes selection of context and management cluster much easier!
+[tmcp](tmcp) helps you switch between VMware Tanzu Mission Control (TMC) CLI provisioners.
+
+Note: If you have [fzf](https://github.com/junegunn/fzf) installed, selection of context, management cluster and provisioners is made much easier!
 
 ## Installing
 1. Make sure you have the `tmc` CLI installed.
 2. Clone this repository
-3. Put [tmctx](tmcctx) and [tmcmc](tmcmc) into your `$PATH` or move them, e.g.
+3. Put [tmctx](tmcctx), [tmcmc](tmcmc) and [tmcmp](tmcmp) into your `$PATH` or move them, e.g.
 ```shell
 ln -sf $PWD/tmctx /usr/local/bin/tmctx
 ln -sf $PWD/tmcmc /usr/local/bin/tmcmc
+ln -sf $PWD/tmcp /usr/local/bin/tmcp
 ```
 
 ## Other Tanzu Mission Control CLI stuff

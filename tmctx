@@ -2,7 +2,7 @@
 # @file tmctx
 # Simple switch TMC contexts
 # @author Alister Lewis-Bowen <alister@lewis-bowen.org>
-# Adapted for TMC from TMCTX
+# Adapted for TMC from kubectx
 # @ref https://github.com/ahmetb/TMCTX
 
 [[ -n $DEBUG ]] && set -x
