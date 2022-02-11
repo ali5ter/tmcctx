@@ -124,7 +124,7 @@ choose_provisioner_interactive() {
     local choice
     choice="$(_KUBECTX_FORCE_COLOR=1 \
         FZF_DEFAULT_COMMAND="${SELF_CMD}" \
-        fzf --ansi --no-preview || true)"
+        fzf --height=40% --layout=reverse --info=inline --border --ansi --no-preview || true)"
     if [[ -z "${choice}" ]]; then
         echo 2>&1 "error: you did not choose any of the options"
         exit 1
