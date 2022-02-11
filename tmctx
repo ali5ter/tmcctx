@@ -35,10 +35,10 @@ current_context() {
 }
 
 get_contexts() {
-    tmc system context current | \
-        grep ' name:' | \
-        cut -d':' -f2 | \
-        sed -e 's/^[ ]*//'| sort -n
+    tmc system context list | \
+        awk '{print $1}' | \
+        grep -v NAME | \
+        sort -n
 }
 
 list_contexts() {
