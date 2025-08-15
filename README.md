@@ -1,3 +1,5 @@
+> **⚠️ This project is archived and no longer maintained.**
+
 # tmctx + tmcmc + tmcp: Tools for VMware Tanzu Mission Control CLI
 
 Inspired by [kubectx](https://github.com/ahmetb/kubectx), this repository provides [tmctx](tmcctx), [tmcmc](tmcmc) and [tmcp](tmcp) utilities.
