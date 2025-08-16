@@ -1,3 +1,5 @@
+> **⚠️ Archived 2025-08-16. No longer maintained.**
+
 > **⚠️ This project is archived and no longer maintained.**
 
 # tmctx + tmcmc + tmcp: Tools for VMware Tanzu Mission Control CLI
